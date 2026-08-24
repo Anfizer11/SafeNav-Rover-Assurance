@@ -34,6 +34,7 @@ outputs/
 # Logs / temp
 *.log
 *.tmp
+data/logs/
 
 # Safety Backup
 *.bak

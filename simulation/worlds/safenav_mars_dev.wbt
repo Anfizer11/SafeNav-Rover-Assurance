@@ -5,13 +5,14 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/project
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Soil.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/nasa/protos/Sojourner.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/rocks/protos/Rock.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/traffic/protos/SignPole.proto"
 
 WorldInfo {
   gravity 3.73
 }
 Viewpoint {
-  orientation 0.17701745022883536 -0.460938204236856 -0.869598064734153 5.591723158245383
-  position -52.46904614222096 -37.525678057558636 22.383971628204772
+  orientation -0.1770186252083378 0.4609598907904484 0.8695863300511388 0.6914283494587287
+  position -52.46904614222096 -37.525678057558615 22.383971628204776
 }
 TexturedBackground {
   texture "mars"
@@ -38,24 +39,44 @@ DEF terrain Solid {
   ]
   boundingObject USE GROUND_SHAPE
 }
-Rock {
+DEF ROCK_01 Rock {
   translation -1.92 0 0.33
   scale 4
 }
-Rock {
+DEF ROCK_02 Rock {
   translation -5.47 2.21 0.7
   name "rock(1)"
   scale 2
 }
-Sojourner {
+DEF ROVER Sojourner {
   translation -0.262875 1.29 0.390796
-  rotation 2.0399299999710176e-06 4.92483999993003e-06 0.9999999999857925 0.785398
+  rotation 2.03993e-06 2.68564e-07 1 2.87979
+  controller "safenav_mars_dev_controller"
+  extensionSlot [
+    Pose {
+      children [
+        DEF nav-camera Camera {
+          translation 0.28 0 0.09
+          name "nav_camera"
+          width 640
+          height 480
+        }
+      ]
+    }
+  ]
 }
-Rock {
+DEF ROCK_03 Rock {
   translation -2.66 2.08 0.35
   name "rock(2)"
 }
-Rock {
+DEF ROCK_04 Rock {
   translation -4.31 1.3 0.45
   name "rock(3)"
+}
+DEF GOAL SignPole {
+  translation -3.21 3.34 0
+}
+DEF safenav_supervisor Robot {
+  controller "safenav_supervisor"
+  supervisor TRUE
 }
