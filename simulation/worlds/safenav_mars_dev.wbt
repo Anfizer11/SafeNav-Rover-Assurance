@@ -51,7 +51,7 @@ DEF ROCK_02 Rock {
 DEF ROVER Sojourner {
   translation -0.262875 1.29 0.390796
   rotation 2.03993e-06 2.68564e-07 1 2.87979
-  controller "safenav_mars_dev_controller"
+  controller "safenav_manual_controller"
   extensionSlot [
     Pose {
       children [
