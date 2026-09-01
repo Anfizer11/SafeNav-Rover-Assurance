@@ -1,0 +1,64 @@
+{
+    "scenario_id": "scenario_004",
+    "description": "Asymmetric route-choice scenario testing whether A* selects the shorter safe route around a central obstacle barrier",
+
+    "rover": {
+        "position": [
+            -0.262875,
+            1.29,
+            0.390796
+        ],
+        "rotation": [
+            0.0000020399499999950273,
+            0.0000008449779999979402,
+            0.9999999999975624,
+            2.35619
+        ]
+    },
+
+    "goal": {
+        "position": [
+            -3.21,
+            3.34,
+            0.0
+        ]
+    },
+
+    "rocks": {
+        "ROCK_01": {
+            "position": [
+                -0.594,
+                3.957,
+                0.28
+            ],
+            "scale": 1.0
+        },
+
+        "ROCK_02": {
+            "position": [
+                -1.165,
+                3.136,
+                0.27
+            ],
+            "scale": 1.0
+        },
+
+        "ROCK_03": {
+            "position": [
+                -1.736,
+                2.315,
+                0.26
+            ],
+            "scale": 1.0
+        },
+
+        "ROCK_04": {
+            "position": [
+                -2.193,
+                1.658,
+                0.27
+            ],
+            "scale": 1.0
+        }
+    }
+}

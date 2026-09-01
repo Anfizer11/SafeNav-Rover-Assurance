@@ -11,8 +11,8 @@ WorldInfo {
   gravity 3.73
 }
 Viewpoint {
-  orientation -0.1770186252083378 0.4609598907904484 0.8695863300511388 0.6914283494587287
-  position -52.46904614222096 -37.525678057558615 22.383971628204776
+  orientation -0.17701851838195284 0.46096307584888613 0.8695846634191476 0.6914241272909082
+  position -13.21603939332542 -7.841991291064381 5.671811884862413
 }
 TexturedBackground {
   texture "mars"
@@ -41,18 +41,20 @@ DEF terrain Solid {
 }
 DEF ROCK_01 Rock {
   translation -1.92 0 0.33
-  scale 4
 }
 DEF ROCK_02 Rock {
   translation -5.47 2.21 0.7
   name "rock(1)"
-  scale 2
 }
 DEF ROVER Sojourner {
   translation -0.262875 1.29 0.390796
-  rotation 2.03993e-06 2.68564e-07 1 2.87979
-  controller "safenav_manual_controller"
+  rotation 2.0399499999950273e-06 8.449779999979402e-07 0.9999999999975624 2.35619
+  controller "safenav_perfect_nav_controller"
   extensionSlot [
+    DEF oracle_receiver Receiver {
+      name "oracle_receiver"
+      channel 1
+    }
     Pose {
       children [
         DEF nav-camera Camera {
@@ -77,6 +79,12 @@ DEF GOAL SignPole {
   translation -3.21 3.34 0
 }
 DEF safenav_supervisor Robot {
+  children [
+    DEF oracle_emitter Emitter {
+      name "oracle_emitter"
+      channel 1
+    }
+  ]
   controller "safenav_supervisor"
   supervisor TRUE
 }

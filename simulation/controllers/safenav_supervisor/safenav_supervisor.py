@@ -2,6 +2,7 @@ import csv
 import math
 from datetime import datetime
 from pathlib import Path
+import json
 
 from controller import Supervisor
 
@@ -11,6 +12,13 @@ from controller import Supervisor
 # ============================================================
 
 supervisor = Supervisor()
+
+oracle_emitter = supervisor.getDevice("oracle_emitter")
+
+if oracle_emitter is None:
+    raise RuntimeError(
+        'Could not find Emitter named "oracle_emitter".'
+    )
 
 TIME_STEP = int(supervisor.getBasicTimeStep())
 
@@ -115,6 +123,170 @@ timestamp = datetime.now().strftime(
 
 LOG_FILE = LOG_DIRECTORY / f"mission_{timestamp}.csv"
 
+# ============================================================
+# SCENARIO CONFIGURATION
+# ============================================================ 
+
+ACTIVE_SCENARIO = "scenario_003"
+
+SCENARIO_FILE = (
+    PROJECT_ROOT
+    / "scenarios"
+    / f"{ACTIVE_SCENARIO}.json"
+)
+
+# ============================================================
+# LOAD AND APPLY SCENARIO
+# ============================================================
+
+if not SCENARIO_FILE.exists():
+    raise FileNotFoundError(
+        f"Could not find scenario file:\n"
+        f"{SCENARIO_FILE}"
+    )
+
+
+with SCENARIO_FILE.open(
+    "r",
+    encoding="utf-8"
+) as scenario_file:
+
+    scenario = json.load(
+        scenario_file
+    )
+
+
+scenario_id = scenario.get(
+    "scenario_id",
+    SCENARIO_FILE.stem
+)
+
+
+print()
+print("========== LOADING SCENARIO ==========")
+print(f"Scenario: {scenario_id}")
+print(f"File: {SCENARIO_FILE}")
+
+
+# ------------------------------------------------------------
+# ROVER
+# ------------------------------------------------------------
+
+rover_translation_field = rover.getField(
+    "translation"
+)
+
+rover_rotation_field = rover.getField(
+    "rotation"
+)
+
+
+if rover_translation_field is None:
+    raise RuntimeError(
+        'ROVER does not have a "translation" field.'
+    )
+
+if rover_rotation_field is None:
+    raise RuntimeError(
+        'ROVER does not have a "rotation" field.'
+    )
+
+
+rover_translation_field.setSFVec3f(
+    scenario["rover"]["position"]
+)
+
+rover_rotation_field.setSFRotation(
+    scenario["rover"]["rotation"]
+)
+
+
+# Clear any velocity/angular velocity the rover
+# may have had before being repositioned.
+rover.resetPhysics()
+
+
+# ------------------------------------------------------------
+# GOAL
+# ------------------------------------------------------------
+
+goal_translation_field = goal.getField(
+    "translation"
+)
+
+
+if goal_translation_field is None:
+    raise RuntimeError(
+        'GOAL does not have a "translation" field.'
+    )
+
+
+goal_translation_field.setSFVec3f(
+    scenario["goal"]["position"]
+)
+
+
+# ------------------------------------------------------------
+# ROCKS
+# ------------------------------------------------------------
+
+for rock_name, rock_config in scenario[
+    "rocks"
+].items():
+
+    if rock_name not in rocks:
+        raise RuntimeError(
+            f'Scenario references "{rock_name}", '
+            f"but that DEF does not exist in the world."
+        )
+
+
+    rock = rocks[rock_name]
+
+
+    rock_translation_field = rock.getField(
+        "translation"
+    )
+
+
+    if rock_translation_field is None:
+        raise RuntimeError(
+            f'{rock_name} does not have a '
+            f'"translation" field.'
+        )
+
+
+    rock_translation_field.setSFVec3f(
+        rock_config["position"]
+    )
+
+
+    # Rock.proto uses a scalar scale value.
+    if "scale" in rock_config:
+
+        rock_scale_field = rock.getField(
+            "scale"
+        )
+
+        if rock_scale_field is None:
+            raise RuntimeError(
+                f'{rock_name} does not have a '
+                f'"scale" field.'
+            )
+
+
+        rock_scale_field.setSFFloat(
+            float(
+                rock_config["scale"]
+            )
+        )
+
+
+    rock.resetPhysics()
+
+
+print("Scenario successfully applied.")
+print()
 
 # ============================================================
 # OPEN CSV
@@ -162,7 +334,16 @@ with LOG_FILE.open(
 
     GOAL_RADIUS_M = 0.75
     MIN_CENTER_DISTANCE_M = 1.0
-    MISSION_TIMEOUT_S = 300.0
+
+    # R4 requirement:
+    # The rover should complete the mission within this time
+    MISSION_TIMEOUT_S = 700.0
+
+    # Diagnostic limit:
+    # Even if R4 is violated, allow the simulation to continue
+    # so we can determine whether the rover eventually reaches
+    # the goal
+    SIMULATION_HARD_STOP_S = 1200.0
 
     # ============================================================
     # MISSION STATE
@@ -176,8 +357,11 @@ with LOG_FILE.open(
     clearance_violated = False
 
     goal_reached = False
-    mission_complete = False
+    goal_reached_time = None
 
+    timeout_violated = False
+
+    mission_complete = False
     mission_end_reason = None
 
     # ========================================================
@@ -196,6 +380,7 @@ with LOG_FILE.open(
 
         rover_position = rover.getPosition()
         goal_position = goal.getPosition()
+        rover_orientation = rover.getOrientation()
 
 
         # ----------------------------------------------------
@@ -240,6 +425,46 @@ with LOG_FILE.open(
         )
 
         # ----------------------------------------------------
+        # World State (sent to controller)
+        # ----------------------------------------------------
+        world_state = {
+            "time": current_time,
+
+            "rover_position": [
+                rover_position[0],
+                rover_position[1],
+                rover_position[2],
+            ],
+
+            "rover_orientation": list(
+                rover_orientation
+            ),
+
+            "goal_position": [
+                goal_position[0],
+                goal_position[1],
+                goal_position[2],
+            ],
+
+            "rocks": {},
+        }
+
+        for rock_name, rock in rocks.items():
+            rock_position = rock.getPosition()
+
+            world_state["rocks"][rock_name] = [
+                rock_position[0],
+                rock_position[1],
+                rock_position[2],
+            ]
+
+        message = json.dumps(world_state)
+
+        oracle_emitter.send(
+            message.encode("utf-8")
+        )
+
+        # ----------------------------------------------------
         # CLEARANCE REQUIREMENT
         # ----------------------------------------------------
 
@@ -259,9 +484,13 @@ with LOG_FILE.open(
         # ----------------------------------------------------
         # Goal Logic
         # ----------------------------------------------------
-        goal_reached = (
-            rover_distance_from_goal_2d <= GOAL_RADIUS_M
-        )
+        goal_reached = (rover_distance_from_goal_2d <= GOAL_RADIUS_M)
+
+        if (
+            goal_reached
+            and goal_reached_time is None
+        ):
+            goal_reached_time = current_time
 
         # ----------------------------------------------------
         # Collision Logic
@@ -276,25 +505,60 @@ with LOG_FILE.open(
             collision_rock = detected_rock
 
         # ----------------------------------------------------
-        # Timeout
+        # MISSION DEADLINE
         # ----------------------------------------------------
-        timed_out = current_time >= MISSION_TIMEOUT_S
+
+        if (
+            current_time > MISSION_TIMEOUT_S
+            and not timeout_violated
+        ):
+
+            timeout_violated = True
+
+            print()
+            print("WARNING: R4 mission deadline exceeded!")
+            print(
+                f"Mission has not completed by "
+                f"{MISSION_TIMEOUT_S:.2f} s."
+            )
+            print(
+                "Simulation will continue for diagnostic purposes."
+            )
+            print()
 
         # ----------------------------------------------------
         # MISSION COMPLETION
         # ----------------------------------------------------
 
         if goal_reached:
+
             mission_complete = True
-            mission_end_reason = "GOAL REACHED"
+
+            if goal_reached_time <= MISSION_TIMEOUT_S:
+                mission_end_reason = "GOAL REACHED"
+
+            else:
+                mission_end_reason = (
+                    "GOAL REACHED AFTER DEADLINE"
+                )
+
 
         elif collision_occurred:
-            mission_complete = True
-            mission_end_reason = f"COLLISION WITH {collision_rock}"
 
-        elif timed_out:
             mission_complete = True
-            mission_end_reason = "TIMEOUT"
+
+            mission_end_reason = (
+                f"COLLISION WITH {collision_rock}"
+            )
+
+
+        elif current_time >= SIMULATION_HARD_STOP_S:
+
+            mission_complete = True
+
+            mission_end_reason = (
+                "SIMULATION HARD STOP"
+            )
         
         # ----------------------------------------------------
         # WRITE TO CSV
@@ -351,7 +615,9 @@ r2_safe_clearance = (
 r3_goal_reached = goal_reached
 
 r4_within_time = (
-    current_time <= MISSION_TIMEOUT_S
+    goal_reached_time is not None
+    and
+    goal_reached_time <= MISSION_TIMEOUT_S
 )
 
 mission_success = (
@@ -396,6 +662,19 @@ print(
     f"Minimum obstacle distance: "
     f"{minimum_rock_distance:.2f} m"
 )
+
+if goal_reached_time is not None:
+
+    print(
+        f"Goal reached at: "
+        f"{goal_reached_time:.2f} s"
+    )
+
+else:
+
+    print(
+        "Goal reached at: NOT REACHED"
+    )
 
 if collision_rock is not None:
     print(
