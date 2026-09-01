@@ -1,0 +1,64 @@
+{
+  "scenario_id": "scenario_005",
+  "description": "Dense obstacle cluster requiring a terrain-influenced detour around multiple nearby hazards.",
+
+  "rover": {
+    "position": [
+      -0.262875,
+      1.29,
+      0.390796
+    ],
+    "rotation": [
+      0.0000020399499999950273,
+      0.0000008449779999979402,
+      0.9999999999975624,
+      2.35619
+    ]
+  },
+
+  "goal": {
+    "position": [
+      -3.21,
+      3.34,
+      0.0
+    ]
+  },
+
+  "rocks": {
+    "ROCK_01": {
+      "position": [
+        -1.80,
+        2.30,
+        0.26
+      ],
+      "scale": 1.0
+    },
+
+    "ROCK_02": {
+      "position": [
+        -2.20,
+        2.20,
+        0.3
+      ],
+      "scale": 1.0
+    },
+
+    "ROCK_03": {
+      "position": [
+        -2.45,
+        1.80,
+        0.3
+      ],
+      "scale": 1.0
+    },
+
+    "ROCK_04": {
+      "position": [
+        -1.95,
+        1.75,
+        0.24
+      ],
+      "scale": 1.0
+    }
+  }
+}

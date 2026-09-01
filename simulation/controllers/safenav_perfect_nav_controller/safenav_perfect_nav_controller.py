@@ -46,6 +46,15 @@ PLANNING_CLEARANCE_M = (
     TRACKING_MARGIN_M
 )
 
+# Approximate maximum horizontal radius of Rock
+ROCK_BASE_RADIUS_M = 0.084
+
+# circular approximation of the Sojourner
+ROVER_EFFECTIVE_RADIUS_M = 0.40
+
+# Additional buffer around the physical rover/rock
+PHYSICAL_SAFETY_MARGIN_M = 0.05
+
 # ============================================================
 # ORACLE RECEIVER
 # ============================================================
@@ -183,7 +192,11 @@ def add_obstacle_to_grid(
             if distance_from_rock <= radius_m:
                 grid[grid_y][grid_x] = 1
 
-def build_occupancy_grid(rocks):
+
+def build_occupancy_grid(
+    rocks,
+    rock_scales
+):
 
     grid = create_empty_grid()
 
@@ -192,14 +205,61 @@ def build_occupancy_grid(rocks):
         rock_x = rock_position[0]
         rock_y = rock_position[1]
 
+        rock_scale = rock_scales[
+            rock_name
+        ]
+
+        # Physical horizontal footprint of this rock.
+        rock_radius_m = (
+            ROCK_BASE_RADIUS_M
+            *
+            rock_scale
+        )
+
+        # R2-based planning envelope.
+        #
+        # This protects the existing center-to-center
+        # clearance requirement and accounts for tracking error.
+        center_clearance_radius_m = (
+            PLANNING_CLEARANCE_M
+        )
+
+        # The rover center must remain far enough from the
+        # rock center that the physical rover and rock
+        # footprints cannot overlap.
+        physical_collision_radius_m = (
+            rock_radius_m
+            +
+            ROVER_EFFECTIVE_RADIUS_M
+            +
+            PHYSICAL_SAFETY_MARGIN_M
+        )
+
+        # The planner must satisfy BOTH constraints, so use
+        # whichever one requires the larger exclusion radius.
+        planning_radius_m = max(
+            center_clearance_radius_m,
+            physical_collision_radius_m
+        )
+
+        print(                          # DEBUG: DELETE
+            f"{rock_name}: "
+            f"scale={rock_scale:.1f}, "
+            f"rock_radius={rock_radius_m:.3f} m, "
+            f"center_envelope={center_clearance_radius_m:.3f} m, "
+            f"physical_envelope={physical_collision_radius_m:.3f} m, "
+            f"planning_radius={planning_radius_m:.3f} m"
+        )
+
         add_obstacle_to_grid(
             grid,
             rock_x,
             rock_y,
-            PLANNING_CLEARANCE_M
+            planning_radius_m
         )
 
     return grid
+
 
 def print_grid(
     grid,
@@ -621,11 +681,17 @@ def clamp(value, minimum, maximum):
 # ------------------------------------------------------------
 
 PROGRESS_EPSILON_M = 0.02
+HEADING_PROGRESS_EPSILON_RAD = math.radians(2.0)
+
 STUCK_WARNING_TIME_S = 10.0
 
 tracked_waypoint_index = None
+
 best_waypoint_distance = float("inf")
+best_heading_error = float("inf")
+
 last_progress_time = robot.getTime()
+last_control_mode = None
 
 turning_in_place = False
 
@@ -695,6 +761,10 @@ while robot.step(TIME_STEP) != -1:
         "rocks"
     ]
 
+    rock_scales = latest_world_state[
+        "rock_scales"
+    ]
+
     current_time = latest_world_state[
         "time"
     ]
@@ -704,8 +774,22 @@ while robot.step(TIME_STEP) != -1:
     # --------------------------------------------------------
     if not map_initialized:
 
+        print()
+        print("========== ORACLE ROCK DATA ==========")
+
+        for rock_name, rock_position in rocks.items():
+
+            print(
+                f"{rock_name}: "
+                f"position={rock_position}, "
+                f"scale={rock_scales[rock_name]}"
+            )
+
+        print()
+        
         occupancy_grid = build_occupancy_grid(
-            rocks
+            rocks,
+            rock_scales
         )
 
         start_cell = world_to_grid(
@@ -933,6 +1017,12 @@ while robot.step(TIME_STEP) != -1:
                 dx = target_x - rover_x
                 dy = target_y - rover_y
 
+                # Recalculate distance for the NEW waypoint.
+                waypoint_distance = math.hypot(
+                    dx,
+                    dy
+                )
+
 
         # ----------------------------------------------------
         # TARGET HEADING
@@ -962,7 +1052,7 @@ while robot.step(TIME_STEP) != -1:
         )
 
 
-                # ----------------------------------------------------
+        # ----------------------------------------------------
         # TURN-IN-PLACE MODE SELECTION
         # ----------------------------------------------------
 
@@ -1055,27 +1145,84 @@ while robot.step(TIME_STEP) != -1:
                 right_speed
             )
 
-        
         # ----------------------------------------------------
         # WAYPOINT PROGRESS / STALL MONITOR
+        # ----------------------------------------------------
+
+        absolute_heading_error = abs(heading_error)
+
+        # ----------------------------------------------------
+        # NEW WAYPOINT
         # ----------------------------------------------------
 
         if tracked_waypoint_index != current_waypoint_index:
 
             tracked_waypoint_index = current_waypoint_index
+
             best_waypoint_distance = waypoint_distance
+            best_heading_error = absolute_heading_error
+
             last_progress_time = current_time
+            last_control_mode = control_mode
+
+
+        # ----------------------------------------------------
+        # CONTROL MODE CHANGED
+        # ----------------------------------------------------
+
+        elif control_mode != last_control_mode:
+
+            # Reset the appropriate progress reference whenever
+            # the controller changes between DRIVE and TURN.
+            best_waypoint_distance = waypoint_distance
+            best_heading_error = absolute_heading_error
+
+            last_progress_time = current_time
+            last_control_mode = control_mode
+
+
+        # ----------------------------------------------------
+        # DRIVE PROGRESS
+        # ----------------------------------------------------
+
+        elif control_mode == "DRIVE":
+
+            if (
+                waypoint_distance
+                <
+                best_waypoint_distance - PROGRESS_EPSILON_M
+            ):
+
+                best_waypoint_distance = waypoint_distance
+                last_progress_time = current_time
+
+
+        # ----------------------------------------------------
+        # TURNING PROGRESS
+        # ----------------------------------------------------
 
         elif (
-            waypoint_distance
-            <
-            best_waypoint_distance - PROGRESS_EPSILON_M
+            control_mode == "TURN_LEFT"
+            or
+            control_mode == "TURN_RIGHT"
         ):
 
-            best_waypoint_distance = waypoint_distance
-            last_progress_time = current_time
+            if (
+                absolute_heading_error
+                <
+                best_heading_error
+                - HEADING_PROGRESS_EPSILON_RAD
+            ):
 
-        elif (
+                best_heading_error = absolute_heading_error
+                last_progress_time = current_time
+
+
+        # ----------------------------------------------------
+        # STALL DETECTION
+        # ----------------------------------------------------
+
+        if (
             current_time - last_progress_time
             >=
             STUCK_WARNING_TIME_S
@@ -1127,8 +1274,10 @@ while robot.step(TIME_STEP) != -1:
 
             print()
 
-            # Prevent warning spam.
+            # Prevent repeated warnings every timestep.
             last_progress_time = current_time
+       
+        
 
         if current_time >= next_navigation_debug_time:
 

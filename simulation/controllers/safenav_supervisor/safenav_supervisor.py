@@ -127,7 +127,7 @@ LOG_FILE = LOG_DIRECTORY / f"mission_{timestamp}.csv"
 # SCENARIO CONFIGURATION
 # ============================================================ 
 
-ACTIVE_SCENARIO = "scenario_003"
+ACTIVE_SCENARIO = "scenario_001"
 
 SCENARIO_FILE = (
     PROJECT_ROOT
@@ -447,16 +447,48 @@ with LOG_FILE.open(
             ],
 
             "rocks": {},
+
+            "rock_scales": {},
         }
 
         for rock_name, rock in rocks.items():
+
             rock_position = rock.getPosition()
+
+            # --------------------------------------------------------
+            # Rock position
+            # --------------------------------------------------------
 
             world_state["rocks"][rock_name] = [
                 rock_position[0],
                 rock_position[1],
                 rock_position[2],
             ]
+
+
+            # --------------------------------------------------------
+            # Rock scale
+            # --------------------------------------------------------
+
+            scale_field = rock.getField(
+                "scale"
+            )
+
+            if scale_field is None:
+
+                # Defensive fallback. The Rock PROTO should expose
+                # a scale field, but assume the default scale if it
+                # cannot be accessed.
+                rock_scale = 1.0
+
+            else:
+
+                rock_scale = scale_field.getSFFloat()
+
+
+            world_state["rock_scales"][rock_name] = (
+                rock_scale
+            )
 
         message = json.dumps(world_state)
 

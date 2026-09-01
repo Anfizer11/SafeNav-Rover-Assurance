@@ -41,10 +41,12 @@ DEF terrain Solid {
 }
 DEF ROCK_01 Rock {
   translation -1.92 0 0.33
+  scale 4
 }
 DEF ROCK_02 Rock {
   translation -5.47 2.21 0.7
   name "rock(1)"
+  scale 2
 }
 DEF ROVER Sojourner {
   translation -0.262875 1.29 0.390796
