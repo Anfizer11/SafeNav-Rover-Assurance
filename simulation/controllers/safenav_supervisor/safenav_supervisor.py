@@ -3,6 +3,7 @@ import math
 from datetime import datetime
 from pathlib import Path
 import json
+import os
 
 from controller import Supervisor
 
@@ -112,6 +113,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 LOG_DIRECTORY = PROJECT_ROOT / "data" / "logs"
 
+RESULT_DIRECTORY = (
+    PROJECT_ROOT
+    / "data"
+    / "results"
+)
+
+RESULT_DIRECTORY.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
 LOG_DIRECTORY.mkdir(
     parents=True,
     exist_ok=True
@@ -121,13 +133,28 @@ timestamp = datetime.now().strftime(
     "%Y-%m-%d_%H-%M-%S"
 )
 
-LOG_FILE = LOG_DIRECTORY / f"mission_{timestamp}.csv"
+LOG_FILE = (
+    LOG_DIRECTORY
+    /
+    f"mission_{timestamp}.csv"
+)
 
 # ============================================================
 # SCENARIO CONFIGURATION
 # ============================================================ 
 
-ACTIVE_SCENARIO = "scenario_001"
+ACTIVE_SCENARIO = os.environ.get(
+    "SAFENAV_SCENARIO",
+    "scenario_001"
+)
+
+BATCH_MODE = (
+    os.environ.get(
+        "SAFENAV_BATCH_MODE",
+        "0"
+    )
+    == "1"
+)
 
 SCENARIO_FILE = (
     PROJECT_ROOT
@@ -155,10 +182,16 @@ with SCENARIO_FILE.open(
         scenario_file
     )
 
-
 scenario_id = scenario.get(
     "scenario_id",
     SCENARIO_FILE.stem
+)
+
+
+RESULT_FILE = (
+    RESULT_DIRECTORY
+    /
+    f"result_{scenario_id}_{timestamp}.json"
 )
 
 
@@ -659,6 +692,71 @@ mission_success = (
     and r4_within_time
 )
 
+# ============================================================
+# MACHINE-READABLE MISSION RESULT
+# ============================================================
+
+mission_result = {
+
+    "scenario_id":
+        scenario_id,
+
+    "seed":
+        scenario.get(
+            "seed",
+            None
+        ),
+
+    "mission_end_reason":
+        mission_end_reason,
+
+    "requirements": {
+
+        "r1_no_collision":
+            r1_no_collision,
+
+        "r2_safe_clearance":
+            r2_safe_clearance,
+
+        "r3_goal_reached":
+            r3_goal_reached,
+
+        "r4_within_time":
+            r4_within_time,
+    },
+
+    "minimum_rock_distance_m":
+        minimum_rock_distance,
+
+    "goal_reached_time_s":
+        goal_reached_time,
+
+    "mission_success":
+        mission_success,
+
+    "log_file":
+        str(LOG_FILE),
+}
+
+
+with RESULT_FILE.open(
+    "w",
+    encoding="utf-8"
+) as result_file:
+
+    json.dump(
+        mission_result,
+        result_file,
+        indent=2
+    )
+
+
+print()
+print(
+    f"Mission result saved to:\n"
+    f"{RESULT_FILE}"
+)
+
 print()
 print("========== MISSION SUMMARY ==========")
 
@@ -719,3 +817,17 @@ if mission_success:
     print("MISSION RESULT: SUCCESS")
 else:
     print("MISSION RESULT: FAILURE")
+
+# ============================================================
+# BATCH-MODE SHUTDOWN
+# ============================================================
+
+if BATCH_MODE:
+
+    print()
+    print(
+        "Batch mode enabled. "
+        "Closing Webots."
+    )
+
+    supervisor.simulationQuit(0)

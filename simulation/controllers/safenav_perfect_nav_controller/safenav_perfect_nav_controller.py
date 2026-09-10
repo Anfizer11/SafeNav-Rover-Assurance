@@ -1,8 +1,41 @@
 import json
 import math
-import heapq
+import sys
+
+from pathlib import Path
 
 from controller import Robot
+
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parents[3]
+)
+
+if str(PROJECT_ROOT) not in sys.path:
+
+    sys.path.insert(
+        0,
+        str(PROJECT_ROOT)
+    )
+
+from planning.grid_planner import (
+    GRID_RESOLUTION,
+    GRID_WIDTH,
+    GRID_HEIGHT,
+
+    world_to_grid,
+    path_to_world_waypoints,
+
+    build_occupancy_grid,
+
+    is_free,
+
+    movement_cost,
+
+    astar,
+    simplify_path,
+)
 
 # ============================================================
 # CONFIGURATION
@@ -11,49 +44,6 @@ from controller import Robot
 robot = Robot()
 
 TIME_STEP = int(robot.getBasicTimeStep())
-
-# ============================================================
-# NAVIGATION GRID CONFIGURATION
-# ============================================================
-
-GRID_MIN_X = -12.0
-GRID_MAX_X = 12.0
-
-GRID_MIN_Y = -12.0
-GRID_MAX_Y = 12.0
-
-GRID_RESOLUTION = 0.5
-
-GRID_WIDTH = (
-    int((GRID_MAX_X - GRID_MIN_X) / GRID_RESOLUTION) + 1
-)
-
-GRID_HEIGHT = (
-    int((GRID_MAX_Y - GRID_MIN_Y) / GRID_RESOLUTION) + 1
-)
-
-
-# Supervisor R2 requirement.
-MIN_CENTER_DISTANCE_M = 1.0
-
-# Extra allowance for physical path-following error.
-TRACKING_MARGIN_M = 0.40
-
-# Required clearance for the planned path.
-PLANNING_CLEARANCE_M = (
-    MIN_CENTER_DISTANCE_M
-    +
-    TRACKING_MARGIN_M
-)
-
-# Approximate maximum horizontal radius of Rock
-ROCK_BASE_RADIUS_M = 0.084
-
-# circular approximation of the Sojourner
-ROVER_EFFECTIVE_RADIUS_M = 0.40
-
-# Additional buffer around the physical rover/rock
-PHYSICAL_SAFETY_MARGIN_M = 0.05
 
 # ============================================================
 # ORACLE RECEIVER
@@ -69,197 +59,8 @@ if oracle_receiver is None:
 oracle_receiver.enable(TIME_STEP)
 
 # ============================================================
-# COORDINATE CONVERSION
-# ============================================================
-
-def world_to_grid(x, y):
-    """
-    Convert Webots world coordinates into integer grid
-    coordinates.
-
-    Returns:
-        (grid_x, grid_y)
-    """
-
-    grid_x = round(
-        (x - GRID_MIN_X) / GRID_RESOLUTION
-    )
-
-    grid_y = round(
-        (y - GRID_MIN_Y) / GRID_RESOLUTION
-    )
-
-    return grid_x, grid_y
-
-
-def grid_to_world(grid_x, grid_y):
-    """
-    Convert integer grid coordinates back into Webots
-    world coordinates.
-
-    Returns:
-        (x, y)
-    """
-
-    x = GRID_MIN_X + grid_x * GRID_RESOLUTION
-    y = GRID_MIN_Y + grid_y * GRID_RESOLUTION
-
-    return x, y
-
-
-def path_to_world_waypoints(path):
-    """
-    Converts coordinates on A* controlled path to 
-    Weebots world coordinates.
-
-    Returns:
-        (x,y)
-    """
-
-    waypoints = []
-
-    for grid_x, grid_y in path:
-        world_x, world_y = grid_to_world(grid_x, grid_y)
-
-        waypoints.append( (world_x, world_y) )
-
-    return waypoints
-
-# ============================================================
 # OCCUPANCY GRID
 # ============================================================
-
-def create_empty_grid():
-
-    return [
-        [0 for _ in range(GRID_WIDTH)]
-        for _ in range(GRID_HEIGHT)
-    ]
-
-def add_obstacle_to_grid(
-    grid,
-    rock_x,
-    rock_y,
-    radius_m
-):
-
-    rock_grid_x, rock_grid_y = world_to_grid(
-        rock_x,
-        rock_y
-    )
-
-    radius_cells = math.ceil(
-        radius_m / GRID_RESOLUTION
-    )
-
-    for dy in range(
-        -radius_cells,
-        radius_cells + 1
-    ):
-
-        for dx in range(
-            -radius_cells,
-            radius_cells + 1
-        ):
-
-            grid_x = rock_grid_x + dx
-            grid_y = rock_grid_y + dy
-
-
-            # Make sure we're still inside the map.
-            if not (
-                0 <= grid_x < GRID_WIDTH
-                and
-                0 <= grid_y < GRID_HEIGHT
-            ):
-                continue
-
-
-            # Convert the candidate cell back into
-            # world coordinates.
-            cell_x, cell_y = grid_to_world(
-                grid_x,
-                grid_y
-            )
-
-
-            distance_from_rock = math.hypot(
-                cell_x - rock_x,
-                cell_y - rock_y
-            )
-
-
-            if distance_from_rock <= radius_m:
-                grid[grid_y][grid_x] = 1
-
-
-def build_occupancy_grid(
-    rocks,
-    rock_scales
-):
-
-    grid = create_empty_grid()
-
-    for rock_name, rock_position in rocks.items():
-
-        rock_x = rock_position[0]
-        rock_y = rock_position[1]
-
-        rock_scale = rock_scales[
-            rock_name
-        ]
-
-        # Physical horizontal footprint of this rock.
-        rock_radius_m = (
-            ROCK_BASE_RADIUS_M
-            *
-            rock_scale
-        )
-
-        # R2-based planning envelope.
-        #
-        # This protects the existing center-to-center
-        # clearance requirement and accounts for tracking error.
-        center_clearance_radius_m = (
-            PLANNING_CLEARANCE_M
-        )
-
-        # The rover center must remain far enough from the
-        # rock center that the physical rover and rock
-        # footprints cannot overlap.
-        physical_collision_radius_m = (
-            rock_radius_m
-            +
-            ROVER_EFFECTIVE_RADIUS_M
-            +
-            PHYSICAL_SAFETY_MARGIN_M
-        )
-
-        # The planner must satisfy BOTH constraints, so use
-        # whichever one requires the larger exclusion radius.
-        planning_radius_m = max(
-            center_clearance_radius_m,
-            physical_collision_radius_m
-        )
-
-        print(                          # DEBUG: DELETE
-            f"{rock_name}: "
-            f"scale={rock_scale:.1f}, "
-            f"rock_radius={rock_radius_m:.3f} m, "
-            f"center_envelope={center_clearance_radius_m:.3f} m, "
-            f"physical_envelope={physical_collision_radius_m:.3f} m, "
-            f"planning_radius={planning_radius_m:.3f} m"
-        )
-
-        add_obstacle_to_grid(
-            grid,
-            rock_x,
-            rock_y,
-            planning_radius_m
-        )
-
-    return grid
-
 
 def print_grid(
     grid,
@@ -326,217 +127,6 @@ navigation_initialized = False
 navigation_complete = False
 
 # ============================================================
-# GRID HELPERS
-# ============================================================
-
-def is_in_bounds(cell):
-    x, y = cell
-
-    return (
-        0 <= x < GRID_WIDTH 
-        and 
-        0 <= y < GRID_HEIGHT
-    )
-
-def is_free(grid, cell):
-    x, y = cell
-
-    return grid[y][x] == 0
-
-
-def get_neighbors(grid, cell):
-
-    x, y = cell
-
-    directions = [
-        (-1,  0),
-        ( 1,  0),
-        ( 0, -1),
-        ( 0,  1),
-
-        (-1, -1),
-        (-1,  1),
-        ( 1, -1),
-        ( 1,  1),
-    ]
-
-    neighbors = []
-
-    for dx, dy in directions:
-
-        next_cell = (
-            x + dx,
-            y + dy
-        )
-
-        if not is_in_bounds(next_cell):
-            continue
-
-        if not is_free(grid, next_cell):
-            continue
-
-        # Prevents diagonal "corner cutting"
-        if dx != 0 and dy != 0:
-
-            horizontal_cell = (
-                x + dx,
-                y
-            )
-
-            vertical_cell = (
-                x,
-                y + dy
-            )
-
-            if (
-                not is_free(grid, horizontal_cell)
-                or
-                not is_free(grid, vertical_cell)
-            ):
-                continue
-        
-        neighbors.append(next_cell)
-
-    return neighbors
-
-def movement_cost(current, neighbor):
-
-    current_x, current_y = current
-    neighbor_x, neighbor_y = neighbor
-
-    dx = abs(neighbor_x - current_x)
-    dy = abs(neighbor_y - current_y)
-
-    if dx == 1 and dy == 1:
-        return math.sqrt(2)
-
-    return 1.0
-
-def heuristic(cell, goal):
-
-    x1, y1 = cell
-    x2, y2 = goal
-
-    return math.hypot(x2-x1, y2 - y1)
-
-# ============================================================
-# A* PATH PLANNER
-# ============================================================
-
-def astar(grid, start, goal):
-
-    # --------------------------------------------------------
-    # Validate start and goal
-    # --------------------------------------------------------
-    if not is_in_bounds(start):
-        raise ValueError(
-            f"Start cell {start} is outside the grid."
-        )
-
-    if not is_in_bounds(goal):
-        raise ValueError(
-            f"Goal cell {goal} is outside the grid."
-        )
-
-    if not is_free(grid, start):
-        raise ValueError(
-            f"Start cell {start} is occupied."
-        )
-
-    if not is_free(grid, goal):
-        raise ValueError(
-            f"Goal cell {goal} is occupied."
-        )
-
-    # --------------------------------------------------------
-    # A* data structures
-    # --------------------------------------------------------
-
-    # list of (f_score, cell)
-    open_set = []
-
-    heapq.heappush(open_set, (heuristic(start, goal), start))
-
-    # dictionary history of visited cells
-    came_from = {}
-
-    g_score = {
-        start: 0.0
-    }
-
-    # --------------------------------------------------------
-    # Search
-    # --------------------------------------------------------
-    while open_set:
-
-        _, current = heapq.heappop( # disregard f_score (needs to be recalculated)
-            open_set
-        )
-
-        # Check if we reached the goal
-        if current == goal:
-
-            path = [current]
-
-            while current in came_from:
-
-                current = came_from[current]
-                path.append(current)
-
-            path.reverse()
-
-            return path
-
-
-        for neighbor in get_neighbors(grid, current):
-            
-            tentative_g_score = (g_score[current] + movement_cost(current, neighbor))
-
-            if tentative_g_score < g_score.get(neighbor, float("inf")):
-
-                came_from[neighbor] = current
-                g_score[neighbor] = (tentative_g_score)
-                f_score = (tentative_g_score + heuristic(neighbor, goal))
-                heapq.heappush(open_set, (f_score, neighbor))
-
-
-    # If no route exists
-    return None
-
-
-def simplify_path(path):
-
-    if len(path) <= 2:
-        return path
-
-    simplified = [path[0]]
-
-    previous_dx = None
-    previous_dy = None
-
-    for i in range(1, len(path)):
-
-        current = path[i - 1]
-        next_cell = path[i]
-
-        dx = next_cell[0] - current[0]
-        dy = next_cell[1] - current[1]
-
-        if (
-            previous_dx is not None
-            and
-            (dx != previous_dx or dy != previous_dy)
-        ):
-            simplified.append(current)
-
-        previous_dx = dx
-        previous_dy = dy
-
-    simplified.append(path[-1])
-
-    return simplified
-
-# ============================================================
 # WAYPOINT FOLLOWING CONFIGURATION
 # ============================================================
 
@@ -548,12 +138,12 @@ FINAL_GOAL_TOLERANCE_M = 0.75
 
 # Turn in place only when the rover is substantially
 # misaligned with the target.
-TURN_START_THRESHOLD = math.radians(90)
+TURN_START_THRESHOLD = math.radians(35)
 
 # Once pivoting has started, continue until the rover
 # is reasonably aligned. The gap between 90 and 60
 # prevents rapid DRIVE/TURN switching.
-TURN_STOP_THRESHOLD = math.radians(60)
+TURN_STOP_THRESHOLD = math.radians(15)
 
 STEERING_GAIN = 0.8
 MAX_STEERING_CORRECTION = 0.20
@@ -789,7 +379,8 @@ while robot.step(TIME_STEP) != -1:
         
         occupancy_grid = build_occupancy_grid(
             rocks,
-            rock_scales
+            rock_scales,
+            debug=True
         )
 
         start_cell = world_to_grid(

@@ -46,7 +46,7 @@ DEF ROCK_01 Rock {
 DEF ROCK_02 Rock {
   translation -5.47 2.21 0.7
   name "rock(1)"
-  scale 2
+  scale 4
 }
 DEF ROVER Sojourner {
   translation -0.262875 1.29 0.390796
@@ -72,6 +72,7 @@ DEF ROVER Sojourner {
 DEF ROCK_03 Rock {
   translation -2.66 2.08 0.35
   name "rock(2)"
+  scale 3
 }
 DEF ROCK_04 Rock {
   translation -4.31 1.3 0.45
