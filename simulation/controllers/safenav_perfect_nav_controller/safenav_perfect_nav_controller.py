@@ -1,6 +1,7 @@
 import json
 import math
 import sys
+import os
 
 from pathlib import Path
 
@@ -44,6 +45,26 @@ from planning.grid_planner import (
 robot = Robot()
 
 TIME_STEP = int(robot.getBasicTimeStep())
+
+CAPTURE_PERCEPTION_DATA = (
+    os.environ.get("SAFENAV_CAPTURE_PERCEPTION", "0") == "1"
+)
+
+CAPTURE_INTERVAL_S = 2.0
+
+next_perception_capture_time = 1.0
+perception_capture_index = 0
+
+# ============================================================
+# NAVIGATION CAMERA
+# ============================================================
+
+nav_camera = robot.getDevice("nav_camera")
+
+if nav_camera is None:
+    raise RuntimeError('Could not find Camera named "nav_camera".')
+
+nav_camera.enable(TIME_STEP)
 
 # ============================================================
 # ORACLE RECEIVER
@@ -358,6 +379,52 @@ while robot.step(TIME_STEP) != -1:
     current_time = latest_world_state[
         "time"
     ]
+
+    # --------------------------------------------------------
+    # PROJECTION DEBUG CAPTURE
+    # --------------------------------------------------------
+
+    if (CAPTURE_PERCEPTION_DATA and current_time >= next_perception_capture_time):
+
+        scenario_id = latest_world_state["scenario_id"]
+
+        capture_directory = (
+            PROJECT_ROOT
+            / "data"
+            / "frames"
+            / "perception_raw"
+            / scenario_id
+        )
+
+        capture_directory.mkdir(parents=True, exist_ok=True)
+
+        frame_name = f"frame_{perception_capture_index:04d}"
+
+        image_path = capture_directory / f"{frame_name}.png"
+        state_path = capture_directory / f"{frame_name}_state.json"
+
+        nav_camera.saveImage(str(image_path), 100)
+
+        capture_state = {
+            "scenario_id": scenario_id,
+            "time": current_time,
+            "rover_position": rover_position,
+            "rover_orientation": rover_orientation,
+            "goal_position": goal_position,
+            "rocks": rocks,
+            "rock_scales": rock_scales
+        }
+
+        with open(state_path, "w") as file:
+            json.dump(capture_state, file, indent=2)
+
+        print(
+            f"Perception frame {perception_capture_index:04d} "
+            f"captured at t={current_time:.2f}s"
+        )
+
+        perception_capture_index += 1
+        next_perception_capture_time += CAPTURE_INTERVAL_S
 
     # --------------------------------------------------------
     # INITIALIZE MAP

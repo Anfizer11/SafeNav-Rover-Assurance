@@ -461,6 +461,8 @@ with LOG_FILE.open(
         # World State (sent to controller)
         # ----------------------------------------------------
         world_state = {
+            "scenario_id": scenario_id,
+            
             "time": current_time,
 
             "rover_position": [

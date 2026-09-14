@@ -19,6 +19,9 @@ Thumbs.db
 data/frames/
 data/logs/
 data/datasets/
+data/results/
+
+# Generated experiment / evaluation output
 results/
 outputs/
 
@@ -34,7 +37,6 @@ outputs/
 # Logs / temp
 *.log
 *.tmp
-data/logs/
 
-# Safety Backup
+# Safety backups
 *.bak
